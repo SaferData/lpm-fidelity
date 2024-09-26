@@ -3,7 +3,7 @@ name = "lpm-fidelity"
 version = "0.0.1"
 description = "Assessing fidelity of synthetic data"
 license = "Apache-2.0"
-authors = ["Ulli Schaechtle <ulli@mit.edu>"]
+authors = ["Ulli Schaechtle <ulli@mit.edu>","Tim Burress <tim-burress@garage.co.jp>"]
 readme = "README.md"
 packages = [{include = "lpm_fidelity",from = "src"}]
 repository = "https://github.com/inferenceql/lpm.fidelity"
@@ -22,3 +22,6 @@ pytest = "^8.3.3"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = [ "src" ]
