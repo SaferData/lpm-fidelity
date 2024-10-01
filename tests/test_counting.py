@@ -1,13 +1,14 @@
 import numpy as np
 import polars as pl
 import pytest
-
+from polars.testing import assert_frame_equal
 from lpm_fidelity.counting import _is_none_or_nan
 from lpm_fidelity.counting import normalize_count
 from lpm_fidelity.counting import normalize_count_bivariate
 from lpm_fidelity.counting import harmonize_categorical_probabilities
 from lpm_fidelity.counting import _probabilities_safe_as_denominator
 from lpm_fidelity.counting import contingency_table
+from lpm_fidelity.counting import bivariate_empirical_frequencies
 
 import sys
 
@@ -299,3 +300,73 @@ def test_contingency_table_2x2_with_nan():
         contingency_table(["a", "b", np.nan], ["x", "y"]).tolist()
         == np.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
     )
+
+
+def test_count_in_dfs_single():
+    dfs = {
+        "quax": pl.DataFrame(
+            {
+                "foo": ["A", "A", "B", "B", "B", "B", "B", "B"],
+                "bar": ["X", "Y", "X", "X", "Y", "Y", "Y", "Y"],
+            }
+        )
+    }
+    foo_vals = ["A", "A", "B", "B"]
+    bar_vals = ["X", "Y", "X", "Y"]
+    expected = pl.DataFrame(
+        {
+            "foo": foo_vals,
+            "bar": bar_vals,
+            "Normalized frequency": [0.125, 0.125, 0.25, 0.5],
+            "Source": ["quax"] * 4,
+        }
+    )
+    assert_frame_equal(expected, bivariate_empirical_frequencies(dfs, "foo", "bar"))
+
+
+def test_count_in_dfs():
+    dfs = {
+        "quax": pl.DataFrame(
+            {
+                "foo": ["A", "A", "B", "B", "B", "B", "B", "B"],
+                "bar": ["X", "Y", "X", "X", "Y", "Y", "Y", "Y"],
+            }
+        ),
+        "quagga": pl.DataFrame(
+            {
+                "foo": ["A", "A"],
+                "bar": ["X", "Y"],
+            }
+        ),
+        "baz": pl.DataFrame(
+            {
+                "foo": ["A", "A", "B", "B", "B", "B", "B", "B"],
+                "bar": ["X", "Y", "X", "X", "Y", "Y", "Y", "Y"],
+            }
+        ),
+    }
+
+    foo_vals = ["A", "A", "B", "B"]
+    bar_vals = ["X", "Y", "X", "Y"]
+    expected = pl.DataFrame(
+        {
+            "foo": foo_vals + foo_vals + foo_vals,
+            "bar": bar_vals + bar_vals + bar_vals,
+            "Normalized frequency": [
+                0.125,
+                0.125,
+                0.25,
+                0.5,
+                0.5,
+                0.5,
+                0.0,
+                0.0,
+                0.125,
+                0.125,
+                0.25,
+                0.5,
+            ],
+            "Source": ["quax"] * 4 + ["quagga"] * 4 + ["baz"] * 4,
+        }
+    ).sort(["foo", "bar"])
+    assert_frame_equal(expected, bivariate_empirical_frequencies(dfs, "foo", "bar"))
