@@ -168,3 +168,60 @@ def contingency_table(column_a, column_b):
         contingency_table[i, 0] = column_a.count(value)
         contingency_table[i, 1] = column_b.count(value)
     return contingency_table
+
+
+def bivariate_empirical_frequencies(dfs, column_name_a, column_name_b):
+    """
+    Computes the normalized bivariate empirical frequencies for two categorical variables
+    across multiple data sources and returns the result as a Polars DataFrame.
+
+    This function takes a dictionary of Polars dataframes (`dfs`), where each dataframe represents
+    a dataset from a different source, and calculates the normalized joint frequency of
+    occurrences for the two categorical columns `column_name_a` and `column_name_b`. The
+    function ensures that all datasets are harmonized, meaning they contain the same
+    categories for the specified columns, by matching the categories across all sources.
+
+    Parameters:
+    - dfs (dict of {str: pl.DataFrame}): A dictionary where keys are the source names
+        (strings) and values are Polars DataFrames containing the data.
+    - column_name_a (str): The name of the first categorical column to be used for
+        computing bivariate frequencies.
+    - column_name_b (str): The name of the second categorical column to be used for
+        computing bivariate frequencies.
+
+    Returns:
+    - pl.DataFrame: A Polars DataFrame with the following columns:
+            - `column_name_a`: The categories from the first column.
+            - `column_name_b`: The categories from the second column.
+            - `"Normalized frequency"`: The normalized joint frequency for the pair of categories.
+            - `"Source"`: The source of the data (corresponding to the keys from `dfs`).
+
+        The resulting DataFrame is sorted by `column_name_a` and `column_name_b`.
+    """
+    # First, get the empirically counted frequeencies for each df in dfs.
+    counts = {
+        source: normalize_count_bivariate(df[column_name_a], df[column_name_b])
+        for source, df in dfs.items()
+    }
+    # Next, we have to make sure we have all categories; we create a reference
+    # count.
+    sources = list(counts.keys())
+    ref_count = counts[sources[0]]
+    for source in sources[1:]:
+        ref_count, _ = harmonize_categorical_probabilities(ref_count, counts[source])
+
+    # Loop over all empirical counts and record results.
+    empirical_counts = {
+        column_name_a: [],
+        column_name_b: [],
+        "Normalized frequency": [],
+        "Source": [],
+    }
+    for source, count in counts.items():
+        _, count = harmonize_categorical_probabilities(ref_count, count)
+        for (x, y), v in count.items():
+            empirical_counts[column_name_a].append(x)
+            empirical_counts[column_name_b].append(y)
+            empirical_counts["Normalized frequency"].append(v)
+            empirical_counts["Source"].append(source)
+    return pl.DataFrame(empirical_counts).sort([column_name_a, column_name_b])
