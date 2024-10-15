@@ -10,7 +10,7 @@ repository = "https://github.com/inferenceql/lpm.fidelity"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-numpy = "^2.1.1"
+numpy = "1.26.4"
 scipy = "^1.14.1"
 polars = "^1.7.1"
 POT = {git = "https://github.com/PythonOT/POT.git", branch = "master"}
