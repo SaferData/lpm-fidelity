@@ -8,15 +8,17 @@ def get_mapping(df: pl.DataFrame, columns=None):
         columns = df.columns
     mapping = {}
     for c in columns:
-        mapping[c] = {
-            v: i for i, v in enumerate(df[c].drop_nulls().unique().sort().to_list())
-        }
+        if df[c].dtype == pl.Utf8:
+            mapping[c] = {
+                v: i for i, v in enumerate(df[c].drop_nulls().unique().sort().to_list())
+            }
     return mapping
 
 
 def categorical_df_to_integer(df: pl.DataFrame, mapping: dict):
     for c in df.columns:
-        df = df.with_columns([pl.col(c).replace(mapping[c]).cast(pl.Int64)])
+        if df[c].dtype == pl.Utf8:
+            df = df.with_columns([pl.col(c).replace(mapping[c]).cast(pl.Int64)])
     array = df.with_columns(pl.all().to_physical()).to_numpy()
     return array
 
@@ -65,7 +67,6 @@ def score_ot(df1, df2, distance_metric="jaccard", ot_solver="sinkhorn"):
         print(f"Wasserstein loss: {wasserstein_loss}")
     """
     assert df1.columns == df2.columns
-    assert set(df1.dtypes + df2.dtypes) == set([pl.Utf8])
     assert df1.shape == df2.shape
     assert distance_metric in DISTANCE_METRICS
     assert ot_solver in OT_SOLVERS
