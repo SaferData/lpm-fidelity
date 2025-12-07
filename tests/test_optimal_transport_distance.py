@@ -1,10 +1,12 @@
 import itertools
+
 import polars as pl
 import pytest
+
 from lpm_fidelity.optimal_transport_distance import (
-    score_ot,
     DISTANCE_METRICS,
     OT_SOLVERS,
+    score_ot,
 )
 
 # Approximating zero with the following tolerance.

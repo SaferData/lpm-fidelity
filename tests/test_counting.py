@@ -1,16 +1,19 @@
+import sys
+
 import numpy as np
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
-from lpm_fidelity.counting import _is_none_or_nan
-from lpm_fidelity.counting import normalize_count
-from lpm_fidelity.counting import normalize_count_bivariate
-from lpm_fidelity.counting import harmonize_categorical_probabilities
-from lpm_fidelity.counting import _probabilities_safe_as_denominator
-from lpm_fidelity.counting import contingency_table
-from lpm_fidelity.counting import bivariate_empirical_frequencies
 
-import sys
+from lpm_fidelity.counting import (
+    _is_none_or_nan,
+    _probabilities_safe_as_denominator,
+    bivariate_empirical_frequencies,
+    contingency_table,
+    harmonize_categorical_probabilities,
+    normalize_count,
+    normalize_count_bivariate,
+)
 
 
 @pytest.mark.parametrize("value", [None, np.nan])

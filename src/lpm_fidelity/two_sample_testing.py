@@ -1,8 +1,5 @@
-import argparse
 import numpy as np
 import polars as pl
-import sys
-
 from scipy.stats import chi2_contingency
 
 from lpm_fidelity.counting import contingency_table

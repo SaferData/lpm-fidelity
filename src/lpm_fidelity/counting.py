@@ -1,7 +1,8 @@
-import polars as pl
-from collections import Counter
 import sys
+from collections import Counter
+
 import numpy as np
+import polars as pl
 
 
 def _is_none_or_nan(value):

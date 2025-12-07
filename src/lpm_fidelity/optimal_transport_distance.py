@@ -1,5 +1,5 @@
-import ot
 import numpy as np
+import ot
 import polars as pl
 
 

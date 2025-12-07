@@ -1,11 +1,13 @@
 import polars as pl
 import pytest
 
-from lpm_fidelity.distances import tvd
-from lpm_fidelity.distances import bivariate_distance
-from lpm_fidelity.distances import bivariate_distances_in_data
-from lpm_fidelity.distances import univariate_distance
-from lpm_fidelity.distances import univariate_distances_in_data
+from lpm_fidelity.distances import (
+    bivariate_distance,
+    bivariate_distances_in_data,
+    tvd,
+    univariate_distance,
+    univariate_distances_in_data,
+)
 
 
 @pytest.mark.parametrize(
@@ -179,6 +181,7 @@ def test_bivariate_distance_no_overlap_spot():
         )
         == 0.25
     )
+
 
 @pytest.mark.parametrize("distance_metric", ["tvd", "kl", "js"])
 def test_bivariate_distances_in_data_smoke(distance_metric):

@@ -1,16 +1,15 @@
-import argparse
 import itertools
+
 import numpy as np
 import polars as pl
-import sys
-
-from scipy.stats import entropy as scipy_entropy
 from scipy.spatial.distance import jensenshannon as js
+from scipy.stats import entropy as scipy_entropy
 
-from lpm_fidelity.counting import harmonize_categorical_probabilities
-from lpm_fidelity.counting import normalize_count
-from lpm_fidelity.counting import normalize_count_bivariate
-from lpm_fidelity.counting import _probabilities_safe_as_denominator
+from lpm_fidelity.counting import (
+    harmonize_categorical_probabilities,
+    normalize_count,
+    normalize_count_bivariate,
+)
 
 
 def tvd(P, Q):

@@ -1,8 +1,9 @@
-import numpy as np
 import polars as pl
 
-from lpm_fidelity.two_sample_testing import chi_squared
-from lpm_fidelity.two_sample_testing import univariate_two_sample_testing_in_data
+from lpm_fidelity.two_sample_testing import (
+    chi_squared,
+    univariate_two_sample_testing_in_data,
+)
 
 
 def test_chi_squared_smoke():
