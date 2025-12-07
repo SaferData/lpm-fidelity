@@ -1,27 +1,39 @@
-[tool.poetry]
+[project]
 name = "lpm-fidelity"
 version = "0.0.1"
 description = "Assessing fidelity of synthetic data"
-license = "Apache-2.0"
-authors = ["Ulli Schaechtle <ulli@mit.edu>","Tim Burress <tim-burress@garage.co.jp>"]
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Ulli Schaechtle", email = "ulli@mit.edu" },
+    { name = "Tim Burress", email = "tim-burress@garage.co.jp" },
+    { name = "eve n.u.", email = "eve@saferdata.io" },
+]
 readme = "README.md"
-packages = [{include = "lpm_fidelity",from = "src"}]
-repository = "https://github.com/inferenceql/lpm.fidelity"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy==1.26.4",
+    "scipy>=1.14.1,<2",
+    "polars>=1.7.1,<2",
+    "pot>=0.9.4,<1",
+    "jax>=0.5.3",
+    "jaxlib>=0.5.3",
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-numpy = "1.26.4"
-scipy = "^1.14.1"
-polars = "^1.7.1"
-pot = "^0.9.4"
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-benchmark>=5.2.3",
+]
 
-[tool.poetry.group.dev.dependencies]
-black = "^24.8.0"
-pytest = "^8.3.3"
+[project.urls]
+Repository = "https://github.com/SaferData/lpm-fidelity"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lpm_fidelity"]
 
 [tool.pytest.ini_options]
 pythonpath = [ "src" ]

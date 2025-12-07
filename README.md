@@ -15,10 +15,28 @@ matches the real data"* ([Jordan et al., 2022](https://arxiv.org/pdf/2205.03257)
 
 ## Installation
 
-This library is packaged with [Poetry](https://python-poetry.org/). Add this
-line to your `pyproject.toml` file:
+### Requirements
+- Python >=3.12
+
+### As a dependency
+Add this line to your `pyproject.toml` file:
 ```toml
-lpm-fidelity = {git = "https://github.com/neeshjaa/lpm_fidelity.git", branch = "main"}
+dependencies = [
+    "lpm-fidelity @ git+https://github.com/SaferData/lpm-fidelity.git@main"
+]
+```
+
+Then install with:
+```shell
+uv sync
+```
+
+### Development installation
+Clone the repository and install with development dependencies:
+```shell
+git clone https://github.com/SaferData/lpm-fidelity.git
+cd lpm-fidelity
+uv sync --all-extras
 ```
 
 ## Usage
@@ -50,8 +68,12 @@ df_univariate_two_sample_test = univariate_two_sample_testing_in_data(df_foo, df
 ```
 ## Test
 
-Tests can be run with Poetry
-
+Run tests:
 ```shell
-poetry run pytest tests/ -vvv
+uv run pytest tests/ -vvv
+```
+
+Run performance benchmarks:
+```shell
+uv run pytest tests/test_distances.py::test_bivariate_distances_in_data_performance -rP
 ```
