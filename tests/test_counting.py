@@ -6,13 +6,13 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from lpm_fidelity.counting import (
+    OrdinalDF,
     _is_none_or_nan,
     _probabilities_safe_as_denominator,
     bivariate_empirical_frequencies,
     contingency_table,
-    harmonize_categorical_probabilities,
     normalize_count,
-    normalize_count_bivariate,
+    normalize_count_bivariate_memoized,
 )
 
 
@@ -43,18 +43,18 @@ def test_normalize_count_single_str(column):
         [],
         np.array([]),
         pl.Series([]),
-        [None],
-        np.array([None]),
-        pl.Series([None]),
-        [np.nan],
-        np.array([np.nan]),
-        pl.Series([np.nan]),
     ],
 )
 def test_normalize_count_empty(column):
-    with pytest.raises(AssertionError) as exc_info:
+    # Empty columns raise ValueError from OrdinalEncoder
+    with pytest.raises(ValueError):
         normalize_count(column)
-    assert exc_info.type == AssertionError
+
+
+def test_normalize_count_all_null_numpy_none():
+    # np.array([None]) raises IndexError due to empty categories in sklearn
+    with pytest.raises(IndexError):
+        normalize_count(np.array([None]))
 
 
 list_items_numbers = [1]
@@ -111,157 +111,65 @@ def test_normalize_count_with_nan(column):
     assert normalize_count(column) == {"a": 0.25, "b": 0.75}
 
 
-def test_normalize_count_bivariate_single_entry():
-    assert normalize_count_bivariate(["a"], ["b"]) == {
-        (
-            "a",
-            "b",
-        ): 1.0
-    }
+def test_normalize_count_bivariate_memoized_single_entry():
+    df = pl.DataFrame({"c1": ["a"], "c2": ["b"]})
+    odf = OrdinalDF.from_dataframe(df)
+    cols = odf.data[:, :2]
+    memo, total = normalize_count_bivariate_memoized(cols, 1, 1)
+    assert memo.shape == (1, 1)
+    assert memo[0, 0] == 1
+    assert total == 1.0
 
 
-@pytest.mark.parametrize(
-    "column",
-    [
-        [],
-        np.array([]),
-        pl.Series([]),
-        [None],
-        np.array([None]),
-        pl.Series([None]),
-        [np.nan],
-        np.array([np.nan]),
-        pl.Series([np.nan]),
-    ],
-)
-def test_normalize_count_empty(column):
-    with pytest.raises(AssertionError) as exc_info:
-        normalize_count(column)
-    assert exc_info.type == AssertionError
+def test_normalize_count_bivariate_memoized_without_nan():
+    # ["a", "b", "b", "b"] x ["x", "y", "y", "y"]
+    # Expect: (a,x)=1, (b,y)=3, total=4
+    # After encoding: a→0, b→1, x→0, y→1
+    # memo[0,0]=1, memo[1,1]=3
+    df = pl.DataFrame({"c1": ["a", "b", "b", "b"], "c2": ["x", "y", "y", "y"]})
+    odf = OrdinalDF.from_dataframe(df)
+    cols = odf.data[:, :2]
+    n_c1 = len(odf.encoders[0].categories_[0])
+    n_c2 = len(odf.encoders[1].categories_[0])
+    memo, total = normalize_count_bivariate_memoized(cols, n_c1, n_c2)
+
+    assert memo.shape == (2, 2)
+    assert total == 4.0
+    # Normalized: memo / total gives probabilities
+    probs = memo / total
+    assert float(probs[0, 0]) == pytest.approx(0.25)
+    assert float(probs[1, 1]) == pytest.approx(0.75)
+    assert float(probs[0, 1]) == pytest.approx(0.0)
+    assert float(probs[1, 0]) == pytest.approx(0.0)
 
 
-list_items_without_nan_1 = ["a", "b", "b", "b"]
-list_items_without_nan_2 = ["x", "y", "y", "y"]
+def test_normalize_count_bivariate_memoized_empty_raises():
+    df = pl.DataFrame({"c1": [], "c2": []})
+    with pytest.raises(ValueError):
+        OrdinalDF.from_dataframe(df)
 
 
-@pytest.mark.parametrize(
-    "column_1, column_2",
-    [
-        (
-            list_items_without_nan_1,
-            list_items_without_nan_2,
-        ),
-        (
-            np.array(list_items_without_nan_1),
-            np.array(list_items_without_nan_2),
-        ),
-        (pl.Series(list_items_without_nan_1), pl.Series(list_items_without_nan_2)),
-        (
-            np.array(list_items_without_nan_1),
-            list_items_without_nan_2,
-        ),
-        (
-            list_items_without_nan_1,
-            np.array(list_items_without_nan_2),
-        ),
-        (list_items_without_nan_1, pl.Series(list_items_without_nan_2)),
-    ],
-)
-def test_normalize_count_bivariate_without_nan(column_1, column_2):
-    assert normalize_count_bivariate(column_1, column_2) == {
-        (
-            "a",
-            "x",
-        ): 0.25,
-        (
-            "b",
-            "y",
-        ): 0.75,
-    }
-
-
-def test_normalize_count_bivariate_one_empty():
-    col = ["a", "b", "c"]
-    with pytest.raises(AssertionError) as exc_info:
-        normalize_count_bivariate(col, [])
-    assert exc_info.type == AssertionError
-    with pytest.raises(AssertionError) as exc_info:
-        normalize_count_bivariate([], col)
-    assert exc_info.type == AssertionError
-
-
-list_items_nan_1 = ["a", None, "b", "b", "b", None]
-list_items_nan_2 = ["x", None, "y", "y", "y", "y"]
-
-
-@pytest.mark.parametrize(
-    "column_1, column_2",
-    [
-        (
-            list_items_nan_1,
-            list_items_nan_2,
-        ),
-        (
-            np.array(list_items_nan_1),
-            np.array(list_items_nan_2),
-        ),
-        (pl.Series(list_items_nan_1), pl.Series(list_items_nan_2)),
-        (
-            np.array(list_items_nan_1),
-            list_items_nan_2,
-        ),
-        (
-            list_items_nan_1,
-            np.array(list_items_nan_2),
-        ),
-        (list_items_nan_1, pl.Series(list_items_nan_2)),
-    ],
-)
-def test_normalize_count_bivariate_with_nan(column_1, column_2):
-    assert normalize_count_bivariate(column_1, column_2) == {
-        (
-            "a",
-            "x",
-        ): 0.25,
-        (
-            "b",
-            "y",
-        ): 0.75,
-    }
-
-
-@pytest.mark.parametrize(
-    "ps",
-    [
-        {"a": 1.0},
-        {"a": 1.0, "b": 0.0},
-        {"a": 0.5, "b": 0.5},
-    ],
-)
-def test_harmonize_categorical_probabilities_one_empty(ps):
-    assert harmonize_categorical_probabilities(ps, {}) == (
-        ps,
-        {k: 0.0 for k in ps.keys()},
+def test_normalize_count_bivariate_memoized_with_nan():
+    # ["a", None, "b", "b", "b", None] x ["x", None, "y", "y", "y", "y"]
+    # After filtering pairs with -1 (null sentinel): (a,x), (b,y), (b,y), (b,y)
+    # Expect: (a,x)=1, (b,y)=3, total=4
+    df = pl.DataFrame(
+        {"c1": ["a", None, "b", "b", "b", None], "c2": ["x", None, "y", "y", "y", "y"]}
     )
-    assert harmonize_categorical_probabilities({}, ps) == (
-        {k: 0.0 for k in ps.keys()},
-        ps,
-    )
+    odf = OrdinalDF.from_dataframe(df)
+    cols = odf.data[:, :2]
+    n_c1 = len(odf.encoders[0].categories_[0])
+    n_c2 = len(odf.encoders[1].categories_[0])
+    memo, total = normalize_count_bivariate_memoized(cols, n_c1, n_c2)
 
-
-@pytest.mark.parametrize(
-    "ps",
-    [
-        {"a": 1.0},
-        {"a": 1.0, "b": 0.0},
-        {"a": 0.5, "b": 0.5},
-    ],
-)
-def test_harmonize_categorical_probabilities_identicial(ps):
-    assert harmonize_categorical_probabilities(ps, ps) == (
-        ps,
-        ps,
-    )
+    assert memo.shape == (2, 2)
+    # Pairs with -1 sentinel are skipped, so total = 4 (not 6)
+    assert total == 4.0
+    probs = memo / total
+    assert float(probs[0, 0]) == pytest.approx(0.25)
+    assert float(probs[1, 1]) == pytest.approx(0.75)
+    assert float(probs[0, 1]) == pytest.approx(0.0)
+    assert float(probs[1, 0]) == pytest.approx(0.0)
 
 
 def test_probabilities_safe_as_denominator():

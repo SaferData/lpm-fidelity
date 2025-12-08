@@ -17,10 +17,14 @@ dependencies = [
     "pot>=0.9.4,<1",
     "jax>=0.5.3",
     "jaxlib>=0.5.3",
+    "equinox>=0.13.2",
+    "scikit-learn>=1.7.2",
+    "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
 dev = [
+    "jaxtyping>=0.3.3",
     "pytest>=9.0.2",
     "pytest-benchmark>=5.2.3",
     "ruff>=0.14.8",
@@ -38,3 +42,4 @@ packages = ["src/lpm_fidelity"]
 
 [tool.pytest.ini_options]
 pythonpath = [ "src" ]
+addopts = "--ignore=tests/test_distances_performance.py"

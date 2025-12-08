@@ -70,10 +70,10 @@ df_univariate_two_sample_test = univariate_two_sample_testing_in_data(df_foo, df
 
 Run tests:
 ```shell
-uv run pytest tests/ -vvv
+uv run pytest
 ```
 
-Run performance benchmarks:
+Performance benchmarks are excluded by default. To run them:
 ```shell
-uv run pytest tests/test_distances.py::test_bivariate_distances_in_data_performance -rP
+uv run pytest tests/test_distances_performance.py
 ```

@@ -1,15 +1,44 @@
 import itertools
+from enum import IntEnum
+from functools import partial
 
-import numpy as np
+import jax.numpy as jnp
 import polars as pl
-from scipy.spatial.distance import jensenshannon as js
-from scipy.stats import entropy as scipy_entropy
+from jax import Array, jit, vmap
+from jax.lax import cond, switch
+from jax.scipy.special import rel_entr
+from jaxtyping import Integer
 
 from lpm_fidelity.counting import (
-    harmonize_categorical_probabilities,
-    normalize_count,
-    normalize_count_bivariate,
+    OrdinalDF,
+    normalize_count_bivariate_memoized,
+    normalize_count_memoized,
 )
+
+
+class DistanceMetric(IntEnum):
+    """JAX-compatible integer enum for distance metrics."""
+
+    TVD = 0
+    KL = 1
+    JS = 2
+
+
+@jit
+def fasttvd(P, Q):
+    return 0.5 * jnp.sum(jnp.abs(P - Q))
+
+
+@jit
+def fastkl(P, Q):
+    return jnp.sum(rel_entr(P, Q))
+
+
+@jit
+def fastjs(P, Q):
+    # Jensen-Shannon divergence: sqrt(0.5 * (KL(P||M) + KL(Q||M))) where M = 0.5 * (P + Q)
+    M = 0.5 * (P + Q)
+    return jnp.sqrt(0.5 * (fastkl(P, M) + fastkl(Q, M)))
 
 
 def tvd(P, Q):
@@ -29,37 +58,36 @@ def tvd(P, Q):
     """
     assert len(P) > 0
     assert len(P) == len(Q)
-    return 0.5 * sum([np.abs(p - q) for p, q in zip(P, Q)])
+    return float(0.5 * sum([jnp.abs(p - q) for p, q in zip(P, Q)]))
 
 
-def _distance_from_maps(ps_a, ps_b, distance_metric, overlap_required=True):
-    # If we don't require overlap between columns, return 0 if one map is empty
-    if not overlap_required:
-        if (not ps_a) or (not ps_b):
-            return None
-    ps_a, ps_b = harmonize_categorical_probabilities(ps_a, ps_b)
-    # The previous line ensures that the keys are the same. So the following
-    # is safe to do.
-    P = [ps_a[k] for k in ps_a.keys()]
-    Q = [ps_b[k] for k in ps_a.keys()]
-    if distance_metric == "tvd":
-        return tvd(P, Q)
-    elif distance_metric == "kl":
-        # If qk is not null, scipy_entropy computes KL.
-        return scipy_entropy(P, qk=Q)
-    elif distance_metric == "js":
-        return js(P, Q)
-    else:
-        return ValueError(f"Unknown distance metric: {distance_metric}")
+def _fast_distance(ps_a, ps_b, distance_metric: DistanceMetric):
+    return switch(
+        distance_metric,
+        [  # Order is determined by DistanceMetric enum values
+            fasttvd,
+            fastkl,
+            fastjs,
+        ],
+        ps_a,
+        ps_b,
+    )
 
 
-def univariate_distance(column_a, column_b, distance_metric="tvd"):
+@partial(jit, static_argnums=(2, 3))
+def univariate_distance(
+    column_a: Integer[Array, "n"],
+    column_b: Integer[Array, "m"],
+    unique_vals: int,
+    distance_metric: DistanceMetric = DistanceMetric.TVD,
+):
     """
     Compute a set of distance metric for a pair of columns
 
     Parameters:
-    - column_a (List or Polars Series): first column used in distance.
-    - column_b (List or Polars Series): second column used in distance.
+    - column_a (Integer[Array, "n"]): first column used in distance.
+    - column_b (Integer[Array, "m"]): second column used in distance.
+    - unique_vals (int): The number of unique values in the column.
     - distance_metric (str): Choose a distance metric. One of
                               "tvd", "kl", "js".
 
@@ -80,9 +108,11 @@ def univariate_distance(column_a, column_b, distance_metric="tvd"):
             )
         0.5
     """
-    ps_a = normalize_count(column_a)
-    ps_b = normalize_count(column_b)
-    return _distance_from_maps(ps_a, ps_b, distance_metric)
+    cs_a, a = normalize_count_memoized(column_a, unique_vals)
+    cs_b, b = normalize_count_memoized(column_b, unique_vals)
+    ps_a = cs_a / a.astype(jnp.float32)
+    ps_b = cs_b / b.astype(jnp.float32)
+    return _fast_distance(ps_a, ps_b, distance_metric)
 
 
 def univariate_distances_in_data(df_a, df_b, distance_metric="tvd"):
@@ -115,36 +145,46 @@ def univariate_distances_in_data(df_a, df_b, distance_metric="tvd"):
        (Above is using examples values for the distance metric tvd)
     """
     assert set(df_a.columns) == set(df_b.columns)
+
+    # Encode the dataframes' categoricals into integers,
+    # using -1 as sentinel value for nulls
+    odf_a, odf_b = OrdinalDF.from_dataframes([df_a, df_b])
+
+    dm = DistanceMetric[distance_metric.upper()]
+
     result = [
         {
-            "column": c,
+            "column": odf_a.columns[c],
             distance_metric: univariate_distance(
-                df_a[c], df_b[c], distance_metric=distance_metric
+                odf_a.data[:, c],
+                odf_b.data[:, c],
+                len(odf_a.encoders[c].categories_[0]),
+                dm,
             ),
         }
-        for c in df_a.columns
+        for c in range(len(odf_a.columns))
     ]
     return pl.DataFrame(result).sort(distance_metric, descending=False)
 
 
+@partial(jit, static_argnums=(2, 3, 4))
 def bivariate_distance(
-    column_a_1,
-    column_a_2,
-    column_b_1,
-    column_b_2,
-    distance_metric="tvd",
-    overlap_required=True,
+    columns_a: Integer[Array, "n 2"],
+    columns_b: Integer[Array, "n 2"],
+    c1_uniq_vals: int,
+    c2_uniq_vals: int,
+    distance_metric: DistanceMetric = DistanceMetric.TVD,
 ):
     """
     Compute a set of distance metric for a pair of columns
 
-    Parameters:
+    Parameters:i
     - column_a_1 (List or Polars Series):  A column in dataframe a
     - column_a_2 (List or Polars Series):  Another column in dataframe a
     - column_b_1 (List or Polars Series):  A column in dataframe b
     - column_b_2 (List or Polars Series):  Another column in dataframe b
-    - distance_metric (str): Choose a distance metric. One of
-                              "tvd", "kl", "js".
+    - distance_metric (DistanceMetric): Choose a distance metric. One of
+                              DistanceMetric.TVD, DistanceMetric.KL, DistanceMetric.JS.
     - overlap_required bool:  If  two columns don't have non-null overlap,
                               throw error
 
@@ -170,19 +210,27 @@ def bivariate_distance(
             )
         0.5
     """
-    ps_a = normalize_count_bivariate(
-        column_a_1, column_a_2, overlap_required=overlap_required
-    )
-    ps_b = normalize_count_bivariate(
-        column_b_1, column_b_2, overlap_required=overlap_required
-    )
-    return _distance_from_maps(
-        ps_a, ps_b, distance_metric, overlap_required=overlap_required
+    cs_a, a = normalize_count_bivariate_memoized(columns_a, c1_uniq_vals, c2_uniq_vals)
+    cs_b, b = normalize_count_bivariate_memoized(columns_b, c1_uniq_vals, c2_uniq_vals)
+
+    ps_a = jnp.ravel(cs_a / a.astype(jnp.float32))
+    ps_b = jnp.ravel(cs_b / b.astype(jnp.float32))
+
+    return cond(
+        (a > 0) * (b > 0),
+        _fast_distance,
+        lambda _ps_a, _ps_b, _dm: jnp.nan,  # Return NaN if no overlap -- becomes None
+        ps_a,
+        ps_b,
+        distance_metric,
     )
 
 
 def bivariate_distances_in_data(
-    df_a, df_b, distance_metric="tvd", overlap_required=True
+    df_a: pl.DataFrame,
+    df_b: pl.DataFrame,
+    distance_metric: str = "tvd",
+    overlap_required: bool = True,
 ):
     """
     Take two dataframes, create all pairs categorical columns.  For each pair,
@@ -218,18 +266,55 @@ def bivariate_distances_in_data(
     """
     assert set(df_a.columns) == set(df_b.columns)
 
-    def _row(column_1, column_2):
-        d = bivariate_distance(
-            df_a[column_1],
-            df_a[column_2],
-            df_b[column_1],
-            df_b[column_2],
-            overlap_required=overlap_required,
-        )
-        return {"column-1": column_1, "column-2": column_2, distance_metric: d}
+    # Encode the dataframes' categoricals into integers,
+    # using -1 as sentinel value for nulls
+    odf_a, odf_b = OrdinalDF.from_dataframes([df_a, df_b])
 
-    result = [
-        _row(column_1, column_2)
-        for column_1, column_2 in itertools.combinations(df_a.columns, 2)
-    ]
+    pairs = list(itertools.combinations(range(len(odf_a.columns)), 2))
+
+    # idx_combos = jnp.array(pairs, dtype=jnp.int32)
+
+    # Some optimizations for memoization when many columns are similarly sized (unique vals):
+    # 1. compute cardinalities for all columns
+    cardinalities = [len(e.categories_[0]) for e in odf_a.encoders]
+
+    # 2. separate out pairs by their cardinalities, to be vmapped
+    cardwise_map = {}
+    for i, j in pairs:
+        key = (cardinalities[i], cardinalities[j])
+        if key not in cardwise_map:
+            cardwise_map[key] = []
+        cardwise_map[key].append((i, j))
+
+    def _helper(pair: Integer[Array, "2"], da, db, c1_uniq_vals, c2_uniq_vals) -> float:
+        return bivariate_distance(
+            da[:, pair],
+            db[:, pair],
+            c1_uniq_vals,
+            c2_uniq_vals,
+            DistanceMetric[distance_metric.upper()],
+        )
+
+    vh = jit(vmap(_helper, in_axes=(0, None, None, None, None)), static_argnums=(3, 4))
+
+    # helper to encode post-vmap results
+    def _row(index_1: int, index_2: int, d: float):
+        if jnp.isnan(d):
+            if overlap_required:
+                raise ValueError("no overlap")
+            d = None
+
+        return {
+            "column-1": odf_a.columns[index_1],
+            "column-2": odf_a.columns[index_2],
+            distance_metric: d,
+        }
+
+    result = []
+    for (i, j), v in cardwise_map.items():
+        ds = vh(jnp.array(v, dtype=jnp.int32), odf_a.data, odf_b.data, i, j)
+        result.extend(
+            _row(index_1, index_2, d) for (index_1, index_2), d in zip(v, ds.tolist())
+        )
+
     return pl.DataFrame(result).sort(distance_metric, descending=False)
