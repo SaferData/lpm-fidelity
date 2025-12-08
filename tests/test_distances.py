@@ -232,3 +232,38 @@ def test_bivariate_distances_in_data_spot():
     assert df_result["tvd"][0] == pytest.approx(0.0)
     assert df_result["tvd"][1] == pytest.approx(0.4)
     assert df_result["tvd"][2] == pytest.approx(0.4)
+
+
+def _generate_test_data(n_cols: int, n_rows: int) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Generate two dataframes with categorical data for performance testing."""
+    categories = string.ascii_lowercase[: min(26, max(2, n_rows // 10))]
+    data_a = {
+        f"col_{i}": [categories[j % len(categories)] for j in range(n_rows)]
+        for i in range(n_cols)
+    }
+    data_b = {
+        f"col_{i}": [categories[(j + i) % len(categories)] for j in range(n_rows)]
+        for i in range(n_cols)
+    }
+    return pl.DataFrame(data_a), pl.DataFrame(data_b)
+
+
+@pytest.mark.parametrize("n_cols,n_rows", [(4, 5000), (8, 20000), (12, 500000)])
+def test_bivariate_distances_in_data_performance(benchmark, n_cols: int, n_rows: int):
+    df_a, df_b = _generate_test_data(n_cols, n_rows)
+
+    result = benchmark(bivariate_distances_in_data, df_a, df_b, distance_metric="tvd")
+
+    n_pairs = n_cols * (n_cols - 1) // 2
+    assert len(result) == n_pairs
+
+    print(
+        f"\n{'n_cols':<8} {'n_rows':<8} {'n_pairs':<8} "
+        f"{'min_ms':<10} {'median_ms':<12} {'max_ms':<10} {'stddev_ms':<12}"
+    )
+    stats = benchmark.stats.stats
+    print(
+        f"{n_cols:<8} {n_rows:<8} {n_pairs:<8} "
+        f"{stats.min * 1000:<10.3f} {stats.median * 1000:<12.3f} "
+        f"{stats.max * 1000:<10.3f} {stats.stddev * 1000:<12.3f}"
+    )
