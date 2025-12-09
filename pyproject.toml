@@ -19,7 +19,6 @@ dependencies = [
     "jaxlib>=0.5.3",
     "equinox>=0.13.2",
     "scikit-learn>=1.7.2",
-    "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
