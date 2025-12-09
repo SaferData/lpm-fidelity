@@ -2,12 +2,22 @@ import sys
 from functools import partial
 
 import equinox as eqx
-import numpy as np
 import polars as pl
 from jax import Array, jit
 from jax import numpy as jnp
 from jaxtyping import Integer
 from sklearn.preprocessing import OrdinalEncoder
+
+
+def _is_nan(value) -> bool:
+    """Check if value is NaN or None (handles non-numeric types safely)."""
+    match value:
+        case None:
+            return True
+        case Array() | float():
+            return bool(jnp.isnan(value))
+        case _:
+            return False
 
 
 class OrdinalDF(eqx.Module):
@@ -20,7 +30,7 @@ class OrdinalDF(eqx.Module):
         self.encoders = tuple(encoders.values())
         self.data = jnp.column_stack(
             [
-                jnp.array(encoders[c].transform(df[c].to_numpy().reshape(-1, 1)))
+                jnp.array(encoders[c].transform([[x] for x in df[c].to_list()]))
                 for c in self.columns
             ]
         ).astype(jnp.int32)
@@ -54,10 +64,13 @@ class OrdinalDF(eqx.Module):
         # Use handle_unknown to map None -> -1 automatically
         encoders = {}
         for c in concatenated.columns:
-            col_data = concatenated[c].to_numpy().reshape(-1, 1)
-            unique_vals_set = set(col_data.flatten())
-            # Exclude None from categories - it will be handled as unknown -> -1
-            non_null_vals = sorted([v for v in unique_vals_set if v is not None])
+            col_list = concatenated[c].to_list()
+            col_data = [[x] for x in col_list]
+            unique_vals_set = set(col_list)
+            # Exclude None from categories - they will be handled as unknown -> -1
+            non_null_vals = sorted(
+                [v for v in unique_vals_set if not _is_nan(v)]
+            )
             enc = OrdinalEncoder(
                 categories=[non_null_vals],
                 handle_unknown="use_encoded_value",
@@ -68,23 +81,6 @@ class OrdinalDF(eqx.Module):
 
         # 4. create an OrdinalDF *for each input dataframe* using the encoders dict
         return [cls(df, encoders) for df in dfs]
-
-
-def _is_none_or_nan(value):
-    if value is None:
-        return True
-    # Try checking if value is np.nan, catching TypeError for non-numeric values
-    try:
-        if np.isnan(value):
-            return True
-    except TypeError:
-        pass
-    # Value is neither None nor np.nan
-    return False
-
-
-def _is_none_or_nan_bivariate(values):
-    return _is_none_or_nan(values[0]) or _is_none_or_nan(values[1])
 
 
 @partial(jit, static_argnums=(1,))
@@ -105,7 +101,9 @@ def normalize_count_memoized(
     return counts, jnp.sum(counts)
 
 
-def normalize_count(column):
+def normalize_count(
+    column: list | pl.Series,
+) -> dict[str, float]:
     """
     Count occurences of categories. This works on Polars'columns
     i.e. Polars Series.
@@ -143,6 +141,23 @@ def normalize_count_bivariate_memoized(
     c1_uniq_vals: int,
     c2_uniq_vals: int,
 ) -> tuple[Array, int]:
+    """
+    Count co-occurrences of category pairs from two ordinal-encoded columns.
+
+    Uses vectorized scatter-add for efficient counting. Pairs containing -1
+    (null sentinel) are excluded from the count.
+
+    Parameters:
+        cols_1_and_2: JAX array of shape (n, 2) with ordinal-encoded values.
+            Values of -1 indicate null/missing.
+        c1_uniq_vals: Number of unique categories in the first column.
+        c2_uniq_vals: Number of unique categories in the second column.
+
+    Returns:
+        Tuple of (counts, total) where:
+        - counts: JAX array of shape (c1_uniq_vals, c2_uniq_vals) with counts
+        - total: Total number of valid (non-null) pairs counted
+    """
     col1 = cols_1_and_2[:, 0]
     col2 = cols_1_and_2[:, 1]
 
@@ -163,7 +178,11 @@ def normalize_count_bivariate_memoized(
     return counts, jnp.sum(counts)
 
 
-def normalize_count_bivariate(column_1, column_2, overlap_required=True):
+def normalize_count_bivariate(
+    column_1: list | pl.Series,
+    column_2: list | pl.Series,
+    overlap_required: bool = True,
+) -> dict[tuple[str, str], float]:
     """
     Count occurences of events between two categorical columns.
     This works on Polars'columns i.e. Polars Series.
@@ -179,7 +198,7 @@ def normalize_count_bivariate(column_1, column_2, overlap_required=True):
                               throw error
 
     Returns:
-    - dict: A Python dictionary, where keys are typles of categories from the
+    - dict: A Python dictionary, where keys are tuples of categories from the
       two columns and values are the normalized ([0,1]) counts.
 
 
@@ -218,6 +237,11 @@ def harmonize_categorical_probabilities(ps_a, ps_b):
     Harmonize two categorical distributions. Ensure they have the same set of
     keys.
 
+    .. deprecated::
+        This function is deprecated and will be removed in a future version.
+        Use OrdinalDF.from_dataframes() for consistent category encoding across
+        multiple dataframes.
+
     Parameters:
     - ps_a (dict): A dict encoding a categorical probability distribution.
     - ps_b (dict): A dict encoding a categorical probability distribution.
@@ -235,6 +259,14 @@ def harmonize_categorical_probabilities(ps_a, ps_b):
         >>> harmonize_categorical_probabilities({"a": 1.0}, {"a": 0.1, "b": 0.9})
             {"a": 1.0, "b" 0.0}, {"a": 0.1, "b": 0.9}
     """
+    import warnings
+
+    warnings.warn(
+        "harmonize_categorical_probabilities is deprecated. "
+        "Use OrdinalDF.from_dataframes() for consistent category encoding.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # Get the union of keys from both dictionaries
     assert (len(ps_a) > 0) or (len(ps_b) > 0)
     all_keys = set(ps_a) | set(ps_b)
@@ -275,7 +307,7 @@ def _probabilities_safe_as_denominator(ps, constant=sys.float_info.min):
     return {k: _add_constant_if_zero(v) for k, v in ps.items()}
 
 
-def contingency_table(column_a, column_b):
+def contingency_table(column_a, column_b) -> Array:
     """
     Compute the contigency table for two columns in a Polars dataframe.
 
@@ -284,21 +316,21 @@ def contingency_table(column_a, column_b):
     - column_b (List or Polars Series):  The same column from another dataframe.
 
     Returns:
-    - contingency table (np.arrray): a 2-d Numpy array couting the contigencies.
+    - contingency table (Array): a 2-d JAX array counting the contingencies.
     """
     # Sorting unique values here so it's testable. Otherwise, the set/filter
-    # combinations causes for stochatic orderings.
+    # combinations causes for stochastic orderings.
     assert len(column_a) > 0
     assert len(column_b) > 0
     # Ensure columns are list without NaNs:
-    column_a = [val for val in column_a if not _is_none_or_nan(val)]
-    column_b = [val for val in column_b if not _is_none_or_nan(val)]
+    column_a = [val for val in column_a if not _is_nan(val)]
+    column_b = [val for val in column_b if not _is_nan(val)]
     unique_values = sorted(set(column_a + column_b))
-    contingency_table = np.zeros((len(unique_values), 2))
-    for i, value in enumerate(unique_values):
-        contingency_table[i, 0] = column_a.count(value)
-        contingency_table[i, 1] = column_b.count(value)
-    return contingency_table
+    # Build counts as a list of rows, then stack into array (JAX arrays are immutable)
+    rows = [
+        [column_a.count(value), column_b.count(value)] for value in unique_values
+    ]
+    return jnp.array(rows, dtype=jnp.float32)
 
 
 def bivariate_empirical_frequencies(

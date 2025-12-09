@@ -272,9 +272,7 @@ def bivariate_distances_in_data(
 
     pairs = list(itertools.combinations(range(len(odf_a.columns)), 2))
 
-    # idx_combos = jnp.array(pairs, dtype=jnp.int32)
-
-    # Some optimizations for memoization when many columns are similarly sized (unique vals):
+    # Optimizations for memoization when many columns are similarly sized (unique vals):
     # 1. compute cardinalities for all columns
     cardinalities = [len(e.categories_[0]) for e in odf_a.encoders]
 

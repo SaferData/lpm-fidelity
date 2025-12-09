@@ -1,37 +1,27 @@
 import sys
 
-import numpy as np
+import jax.numpy as jnp
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
 from lpm_fidelity.counting import (
     OrdinalDF,
-    _is_none_or_nan,
+    _is_nan,
     _probabilities_safe_as_denominator,
     bivariate_empirical_frequencies,
     contingency_table,
     normalize_count,
+    normalize_count_bivariate,
     normalize_count_bivariate_memoized,
 )
-
-
-@pytest.mark.parametrize("value", [None, np.nan])
-def test_is_none_or_nan_with_null(value):
-    assert _is_none_or_nan(value)
-
-
-@pytest.mark.parametrize("value", ["x", 0, 1, 42.0, "abc"])
-def test_is_none_or_nan_with_value(value):
-    assert not _is_none_or_nan(value)
-
 
 list_items_single = ["a"]
 
 
 @pytest.mark.parametrize(
     "column",
-    [list_items_single, np.array(list_items_single), pl.Series(list_items_single)],
+    [list_items_single, pl.Series(list_items_single)],
 )
 def test_normalize_count_single_str(column):
     assert normalize_count(column) == {list_items_single[0]: 1.0}
@@ -41,20 +31,26 @@ def test_normalize_count_single_str(column):
     "column",
     [
         [],
-        np.array([]),
         pl.Series([]),
     ],
 )
 def test_normalize_count_empty(column):
-    # Empty columns raise ValueError from OrdinalEncoder
-    with pytest.raises(ValueError):
+    # Empty columns raise IndexError from sklearn validation
+    with pytest.raises(IndexError):
         normalize_count(column)
 
 
-def test_normalize_count_all_null_numpy_none():
-    # np.array([None]) raises IndexError due to empty categories in sklearn
+@pytest.mark.parametrize(
+    "column",
+    [
+        [None],
+        pl.Series([None]),
+    ],
+)
+def test_normalize_count_all_null(column):
+    # Columns with only null/NaN raise IndexError (empty categories in sklearn)
     with pytest.raises(IndexError):
-        normalize_count(np.array([None]))
+        normalize_count(column)
 
 
 list_items_numbers = [1]
@@ -62,7 +58,7 @@ list_items_numbers = [1]
 
 @pytest.mark.parametrize(
     "column",
-    [list_items_numbers, np.array(list_items_numbers), pl.Series(list_items_numbers)],
+    [list_items_numbers, pl.Series(list_items_numbers)],
 )
 def test_normalize_count_single_number(column):
     assert normalize_count(column) == {list_items_numbers[0]: 1.0}
@@ -75,10 +71,8 @@ list_two_items = ["a", "b"]
     "column",
     [
         list_two_items,
-        np.array(list_two_items),
         pl.Series(list_two_items),
         list_two_items + list_two_items,
-        np.array(list_two_items + list_two_items),
         pl.Series(list_two_items + list_two_items),
     ],
 )
@@ -93,7 +87,6 @@ list_items_inbalanced = ["a", "b", "b", "b"]
     "column",
     [
         list_items_inbalanced,
-        np.array(list_items_inbalanced),
         pl.Series(list_items_inbalanced),
     ],
 )
@@ -105,7 +98,8 @@ list_items_nan = ["a", None, "b", "b", "b", None]
 
 
 @pytest.mark.parametrize(
-    "column", [list_items_nan, np.array(list_items_nan), pl.Series(list_items_nan)]
+    "column",
+    [list_items_nan, pl.Series(list_items_nan)],
 )
 def test_normalize_count_with_nan(column):
     assert normalize_count(column) == {"a": 0.25, "b": 0.75}
@@ -145,7 +139,7 @@ def test_normalize_count_bivariate_memoized_without_nan():
 
 def test_normalize_count_bivariate_memoized_empty_raises():
     df = pl.DataFrame({"c1": [], "c2": []})
-    with pytest.raises(ValueError):
+    with pytest.raises(IndexError):
         OrdinalDF.from_dataframe(df)
 
 
@@ -172,6 +166,55 @@ def test_normalize_count_bivariate_memoized_with_nan():
     assert float(probs[1, 0]) == pytest.approx(0.0)
 
 
+# Tests for normalize_count_bivariate wrapper function
+
+
+def test_normalize_count_bivariate_single_entry():
+    assert normalize_count_bivariate(["a"], ["b"]) == {("a", "b"): 1.0}
+
+
+@pytest.mark.parametrize(
+    "column_1, column_2",
+    [
+        (["a", "b", "b", "b"], ["x", "y", "y", "y"]),
+        (pl.Series(["a", "b", "b", "b"]), pl.Series(["x", "y", "y", "y"])),
+    ],
+)
+def test_normalize_count_bivariate_without_nan(column_1, column_2):
+    result = normalize_count_bivariate(column_1, column_2)
+    assert result == {("a", "x"): 0.25, ("b", "y"): 0.75}
+
+
+@pytest.mark.parametrize(
+    "column_1, column_2",
+    [
+        (["a", None, "b", "b", "b", None], ["x", None, "y", "y", "y", "y"]),
+        (
+            pl.Series(["a", None, "b", "b", "b", None]),
+            pl.Series(["x", None, "y", "y", "y", "y"]),
+        ),
+    ],
+)
+def test_normalize_count_bivariate_with_nan(column_1, column_2):
+    result = normalize_count_bivariate(column_1, column_2)
+    assert result == {("a", "x"): 0.25, ("b", "y"): 0.75}
+
+
+def test_normalize_count_bivariate_no_overlap():
+    # All pairs have at least one null
+    col_1 = ["a", "a", None, None]
+    col_2 = [None, None, "y", "y"]
+    with pytest.raises(AssertionError, match="no overlap"):
+        normalize_count_bivariate(col_1, col_2, overlap_required=True)
+
+
+def test_normalize_count_bivariate_no_overlap_allowed():
+    col_1 = ["a", "a", None, None]
+    col_2 = [None, None, "y", "y"]
+    result = normalize_count_bivariate(col_1, col_2, overlap_required=False)
+    assert result == {}
+
+
 def test_probabilities_safe_as_denominator():
     assert _probabilities_safe_as_denominator(
         {"a": 0, "b": 1.0}, constant=sys.float_info.min
@@ -188,28 +231,28 @@ def test_probabilities_safe_as_denominator_idenity():
 def test_contingency_table_2x1():
     assert (
         contingency_table(["a", "b"], ["a", "a"]).tolist()
-        == np.asarray([[1, 2], [1, 0]]).tolist()
+        == jnp.asarray([[1, 2], [1, 0]]).tolist()
     )
 
 
 def test_contingency_table_2x2():
     assert (
         contingency_table(["a", "b"], ["x", "y"]).tolist()
-        == np.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
+        == jnp.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
     )
 
 
 def test_contingency_table_2x2_with_None():
     assert (
         contingency_table(["a", "b", None], ["x", "y"]).tolist()
-        == np.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
+        == jnp.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
     )
 
 
 def test_contingency_table_2x2_with_nan():
     assert (
-        contingency_table(["a", "b", np.nan], ["x", "y"]).tolist()
-        == np.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
+        contingency_table(["a", "b", jnp.nan], ["x", "y"]).tolist()
+        == jnp.asarray([[1, 0], [1, 0], [0, 1], [0, 1]]).tolist()
     )
 
 

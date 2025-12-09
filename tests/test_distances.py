@@ -104,9 +104,9 @@ def test_univariate_distance_spot_different_length():
 
 
 def test_univariate_distance_one_empty():
-    # Empty columns now raise ValueError at OrdinalDF encoding time
+    # Empty columns now raise IndexError at sklearn validation time
     df = pl.DataFrame({"col": []})
-    with pytest.raises(ValueError):
+    with pytest.raises(IndexError):
         OrdinalDF.from_dataframe(df)
 
 
