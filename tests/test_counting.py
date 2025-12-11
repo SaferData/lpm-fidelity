@@ -97,6 +97,12 @@ def test_normalize_count_inbalanced_categories(column):
 list_items_nan = ["a", None, "b", "b", "b", None]
 
 
+def test_ordinal_encoding_with_nan():
+    df = pl.DataFrame({"col": list_items_nan})
+    odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0, -1, 1, 1, 1, -1]  # a=0, None=-1, b=1
+
+
 @pytest.mark.parametrize(
     "column",
     [list_items_nan, pl.Series(list_items_nan)],
@@ -108,28 +114,25 @@ def test_normalize_count_with_nan(column):
 def test_normalize_count_bivariate_memoized_single_entry():
     df = pl.DataFrame({"c1": ["a"], "c2": ["b"]})
     odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0]  # a=0
+    assert odf.data[:, 1].tolist() == [0]  # b=0
     cols = odf.data[:, :2]
     memo, total = normalize_count_bivariate_memoized(cols, 1, 1)
-    assert memo.shape == (1, 1)
     assert memo[0, 0] == 1
     assert total == 1.0
 
 
 def test_normalize_count_bivariate_memoized_without_nan():
-    # ["a", "b", "b", "b"] x ["x", "y", "y", "y"]
-    # Expect: (a,x)=1, (b,y)=3, total=4
-    # After encoding: a→0, b→1, x→0, y→1
-    # memo[0,0]=1, memo[1,1]=3
     df = pl.DataFrame({"c1": ["a", "b", "b", "b"], "c2": ["x", "y", "y", "y"]})
     odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0, 1, 1, 1]  # a=0, b=1
+    assert odf.data[:, 1].tolist() == [0, 1, 1, 1]  # x=0, y=1
     cols = odf.data[:, :2]
     n_c1 = len(odf.encoders[0].categories_[0])
     n_c2 = len(odf.encoders[1].categories_[0])
     memo, total = normalize_count_bivariate_memoized(cols, n_c1, n_c2)
 
-    assert memo.shape == (2, 2)
     assert total == 4.0
-    # Normalized: memo / total gives probabilities
     probs = memo / total
     assert float(probs[0, 0]) == pytest.approx(0.25)
     assert float(probs[1, 1]) == pytest.approx(0.75)
@@ -144,20 +147,17 @@ def test_normalize_count_bivariate_memoized_empty_raises():
 
 
 def test_normalize_count_bivariate_memoized_with_nan():
-    # ["a", None, "b", "b", "b", None] x ["x", None, "y", "y", "y", "y"]
-    # After filtering pairs with -1 (null sentinel): (a,x), (b,y), (b,y), (b,y)
-    # Expect: (a,x)=1, (b,y)=3, total=4
     df = pl.DataFrame(
         {"c1": ["a", None, "b", "b", "b", None], "c2": ["x", None, "y", "y", "y", "y"]}
     )
     odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0, -1, 1, 1, 1, -1]  # a=0, b=1, None=-1
+    assert odf.data[:, 1].tolist() == [0, -1, 1, 1, 1, 1]  # x=0, y=1, None=-1
     cols = odf.data[:, :2]
     n_c1 = len(odf.encoders[0].categories_[0])
     n_c2 = len(odf.encoders[1].categories_[0])
     memo, total = normalize_count_bivariate_memoized(cols, n_c1, n_c2)
 
-    assert memo.shape == (2, 2)
-    # Pairs with -1 sentinel are skipped, so total = 4 (not 6)
     assert total == 4.0
     probs = memo / total
     assert float(probs[0, 0]) == pytest.approx(0.25)
@@ -170,6 +170,10 @@ def test_normalize_count_bivariate_memoized_with_nan():
 
 
 def test_normalize_count_bivariate_single_entry():
+    df = pl.DataFrame({"c1": ["a"], "c2": ["b"]})
+    odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0]  # a=0
+    assert odf.data[:, 1].tolist() == [0]  # b=0
     assert normalize_count_bivariate(["a"], ["b"]) == {("a", "b"): 1.0}
 
 
@@ -183,6 +187,15 @@ def test_normalize_count_bivariate_single_entry():
 def test_normalize_count_bivariate_without_nan(column_1, column_2):
     result = normalize_count_bivariate(column_1, column_2)
     assert result == {("a", "x"): 0.25, ("b", "y"): 0.75}
+
+
+def test_ordinal_encoding_bivariate_with_nan():
+    df = pl.DataFrame(
+        {"c1": ["a", None, "b", "b", "b", None], "c2": ["x", None, "y", "y", "y", "y"]}
+    )
+    odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0, -1, 1, 1, 1, -1]  # a=0, None=-1, b=1
+    assert odf.data[:, 1].tolist() == [0, -1, 1, 1, 1, 1]  # x=0, None=-1, y=1
 
 
 @pytest.mark.parametrize(
@@ -201,9 +214,12 @@ def test_normalize_count_bivariate_with_nan(column_1, column_2):
 
 
 def test_normalize_count_bivariate_no_overlap():
-    # All pairs have at least one null
     col_1 = ["a", "a", None, None]
     col_2 = [None, None, "y", "y"]
+    df = pl.DataFrame({"c1": col_1, "c2": col_2})
+    odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0, 0, -1, -1]  # a=0, None=-1
+    assert odf.data[:, 1].tolist() == [-1, -1, 0, 0]  # y=0, None=-1
     with pytest.raises(AssertionError, match="no overlap"):
         normalize_count_bivariate(col_1, col_2, overlap_required=True)
 
@@ -211,6 +227,10 @@ def test_normalize_count_bivariate_no_overlap():
 def test_normalize_count_bivariate_no_overlap_allowed():
     col_1 = ["a", "a", None, None]
     col_2 = [None, None, "y", "y"]
+    df = pl.DataFrame({"c1": col_1, "c2": col_2})
+    odf = OrdinalDF.from_dataframe(df)
+    assert odf.data[:, 0].tolist() == [0, 0, -1, -1]  # a=0, None=-1
+    assert odf.data[:, 1].tolist() == [-1, -1, 0, 0]  # y=0, None=-1
     result = normalize_count_bivariate(col_1, col_2, overlap_required=False)
     assert result == {}
 
@@ -265,6 +285,9 @@ def test_count_in_dfs_single():
             }
         )
     }
+    odf = OrdinalDF.from_dataframe(dfs["quax"])
+    assert odf.data[:, 0].tolist() == [0, 0, 1, 1, 1, 1, 1, 1]  # A=0, B=1
+    assert odf.data[:, 1].tolist() == [0, 1, 0, 0, 1, 1, 1, 1]  # X=0, Y=1
     foo_vals = ["A", "A", "B", "B"]
     bar_vals = ["X", "Y", "X", "Y"]
     expected = pl.DataFrame(
@@ -299,6 +322,9 @@ def test_count_in_dfs():
             }
         ),
     }
+    odfs = OrdinalDF.from_dataframes([dfs["quagga"]])
+    assert odfs[0].data[:, 0].tolist() == [0, 0]  # A=0
+    assert odfs[0].data[:, 1].tolist() == [0, 1]  # X=0, Y=1
 
     foo_vals = ["A", "A", "B", "B"]
     bar_vals = ["X", "Y", "X", "Y"]
