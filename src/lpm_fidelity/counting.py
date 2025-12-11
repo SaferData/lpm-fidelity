@@ -68,9 +68,7 @@ class OrdinalDF(eqx.Module):
             col_data = [[x] for x in col_list]
             unique_vals_set = set(col_list)
             # Exclude None from categories - they will be handled as unknown -> -1
-            non_null_vals = sorted(
-                [v for v in unique_vals_set if not _is_nan(v)]
-            )
+            non_null_vals = sorted([v for v in unique_vals_set if not _is_nan(v)])
             enc = OrdinalEncoder(
                 categories=[non_null_vals],
                 handle_unknown="use_encoded_value",
@@ -327,9 +325,7 @@ def contingency_table(column_a, column_b) -> Array:
     column_b = [val for val in column_b if not _is_nan(val)]
     unique_values = sorted(set(column_a + column_b))
     # Build counts as a list of rows, then stack into array (JAX arrays are immutable)
-    rows = [
-        [column_a.count(value), column_b.count(value)] for value in unique_values
-    ]
+    rows = [[column_a.count(value), column_b.count(value)] for value in unique_values]
     return jnp.array(rows, dtype=jnp.float32)
 
 

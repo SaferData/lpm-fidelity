@@ -7,7 +7,6 @@ from polars.testing import assert_frame_equal
 
 from lpm_fidelity.counting import (
     OrdinalDF,
-    _is_nan,
     _probabilities_safe_as_denominator,
     bivariate_empirical_frequencies,
     contingency_table,

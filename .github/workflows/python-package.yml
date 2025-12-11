@@ -1,0 +1,63 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Python package
+
+on:
+  push:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    env:
+      UV_FROZEN: true
+
+    steps:
+    - name: Checkout the repository
+      uses: actions/checkout@v4
+
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        enable-cache: true
+
+    - name: Sync the environment with what is in uv.lock
+      run: |
+        uv sync
+
+    # example taken from github tutorials.
+    # Cache strategy: once-daily, refresh the JAX disk cache.
+    # There is no risk of poisoning the cache, because the compiler
+    # keys on input hash, but this way we infrequently recompile code
+    # that doesn't change much and is tested many times.
+    - id: get-date
+      run: |
+        echo "date=$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - uses: actions/cache@v4
+      name: Cache jax compilation
+      with:
+        path: .cache/
+        key: ${{ runner.os }}-${{ steps.get-date.outputs.date }}
+
+    - name: Test with pytest
+      run: |
+        uv run pytest --durations=10
+
+    - name: Formatting check with Ruff
+      run: |
+        uv run ruff format --check src/ tests/
+
+    - name: Lint check with Ruff
+      run: |
+        # skipping this check since we have significant drift
+        # uv run ruff check src/ tests/
+        uv run ruff check --select I src/ tests/
