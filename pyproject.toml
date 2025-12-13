@@ -11,10 +11,10 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy==1.26.4",
-    "scipy>=1.14.1,<2",
-    "polars>=1.7.1,<2",
-    "pot>=0.9.4,<1",
+    "numpy>=1.26.4",
+    "scipy>=1.14.1",
+    "polars>=1.7.1",
+    "pot>=0.9.4",
     "jax>=0.5.3",
     "jaxlib>=0.5.3",
     "equinox>=0.13.2",
