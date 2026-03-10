@@ -1,4 +1,5 @@
 import sys
+import warnings
 from functools import partial
 
 import equinox as eqx
@@ -49,16 +50,27 @@ class OrdinalDF(eqx.Module):
         """
         assert len(dfs) > 0, "Must provide at least one dataframe"
 
-        # 1. check that all dataframes have same set() of columns
-        #    n.b. this counting method allows a list of 1 df, to support shared impl
-        first_columns = set(dfs[0].columns)
+        first_columns = dfs[0].columns
+        first_columns_set = set(first_columns)
+        reordered = [dfs[0]]
         for df in dfs[1:]:
-            assert set(df.columns) == first_columns, (
+            assert set(df.columns) == first_columns_set, (
                 "All dataframes must have the same columns"
             )
+            if df.columns != first_columns:
+                warnings.warn(
+                    f"Column order differs across dataframes; "
+                    f"reordering to match the first dataframe: "
+                    f"{first_columns}"
+                    f"This usually means a column was dropped"
+                    f"temporarily, and re-added at the end.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
-        # 2. concatenate dataframes vertically
-        concatenated = pl.concat(dfs, how="vertical")
+            reordered.append(df.select(first_columns))
+
+        concatenated = pl.concat(reordered, how="vertical")
 
         # 3. create an encoders dict from the concatenated dataframe
         # Use handle_unknown to map None -> -1 automatically
@@ -257,8 +269,6 @@ def harmonize_categorical_probabilities(ps_a, ps_b):
         >>> harmonize_categorical_probabilities({"a": 1.0}, {"a": 0.1, "b": 0.9})
             {"a": 1.0, "b" 0.0}, {"a": 0.1, "b": 0.9}
     """
-    import warnings
-
     warnings.warn(
         "harmonize_categorical_probabilities is deprecated. "
         "Use OrdinalDF.from_dataframes() for consistent category encoding.",

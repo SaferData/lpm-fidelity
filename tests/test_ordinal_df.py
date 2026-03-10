@@ -1,3 +1,5 @@
+import warnings
+
 import jax.numpy as jnp
 import polars as pl
 import pytest
@@ -238,3 +240,23 @@ def test_ordinal_df_from_dataframes_mismatched_columns_raises():
 def test_ordinal_df_from_dataframes_empty_list_raises():
     with pytest.raises(AssertionError, match="at least one"):
         OrdinalDF.from_dataframes([])
+
+
+def test_ordinal_df_from_dataframes_different_column_order_warns_and_uses_first():
+    df1 = pl.DataFrame({"col1": ["a", "b"], "col2": ["x", "y"]})
+    df2 = pl.DataFrame({"col2": ["y", "z"], "col1": ["b", "c"]})
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        odfs = OrdinalDF.from_dataframes([df1, df2])
+        column_order_warnings = [
+            x for x in w if "column order" in str(x.message).lower()
+        ]
+        assert len(column_order_warnings) == 1
+
+    assert odfs[0].columns == ("col1", "col2")
+    assert odfs[1].columns == ("col1", "col2")
+
+    assert len(odfs[0].encoders[0].categories_[0]) == 3
+    assert len(odfs[0].encoders[1].categories_[0]) == 3
+    assert odfs[0].encoders[0] is odfs[1].encoders[0]
