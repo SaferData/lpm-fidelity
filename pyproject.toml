@@ -1,6 +1,6 @@
 [project]
 name = "lpm-fidelity"
-version = "0.0.1"
+version = "0.0.2"
 description = "Assessing fidelity of synthetic data"
 license = { text = "Apache-2.0" }
 authors = [
