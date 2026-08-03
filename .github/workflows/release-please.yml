@@ -10,3 +10,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
+      - uses: actions/checkout@v6
+        if: ${{ steps.release.outputs.pr }}
+        with:
+          ref: release-please--branches--main
+      - uses: astral-sh/setup-uv@v7
+        if: ${{ steps.release.outputs.pr }}
+      - if: ${{ steps.release.outputs.pr }}
+        run: |
+          uv lock
+          git diff --quiet uv.lock && exit 0
+          changed=$(git diff -U0 uv.lock | grep -cE '^[+-][^+-]')
+          nonversion=$(git diff -U0 uv.lock | grep -E '^[+-][^+-]' | grep -cv 'version = ' || true)
+          if [ "$changed" -ne 2 ] || [ "$nonversion" -ne 0 ]; then
+            echo "::error::uv lock moved more than the project version; refusing to commit an implicit upgrade"
+            git diff uv.lock
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: sync uv.lock version"
+          git push origin HEAD:release-please--branches--main
