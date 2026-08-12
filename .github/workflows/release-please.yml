@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.pr }}
         with:
           ref: release-please--branches--main
